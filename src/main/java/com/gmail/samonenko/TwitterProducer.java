@@ -10,8 +10,7 @@ import com.twitter.hbc.core.endpoint.StatusesFilterEndpoint;
 import com.twitter.hbc.core.processor.StringDelimitedProcessor;
 import com.twitter.hbc.httpclient.auth.Authentication;
 import com.twitter.hbc.httpclient.auth.OAuth1;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.*;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +30,7 @@ public class TwitterProducer {
     private static final String SECRET = "";
 
     private static final String BOOTSTRAP_SERVERS = "127.0.0.1:9092";
+    private static final List<String> terms = Lists.newArrayList("twitter", "api");
 
 
     public static void main(String[] args) {
@@ -48,6 +48,13 @@ public class TwitterProducer {
         // create kafka producer
         KafkaProducer kafkaProducer = createKafkaProducer();
 
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            LOGGER.info("Stop twitter client");
+            client.stop();
+            LOGGER.info("Close Kafka Producer");
+            kafkaProducer.close();
+        }));
+
         // loop to send tweets to kafka
         while (!client.isDone()) {
             String msg = null;
@@ -60,8 +67,17 @@ public class TwitterProducer {
             }
             if (msg != null) {
                 LOGGER.info(msg);
+                kafkaProducer.send(new ProducerRecord("twitter_tweets", null, msg, new Callback() {
+                    @Override
+                    public void onCompletion(RecordMetadata recordMetadata, Exception e) {
+                        if (e != null) {
+                            LOGGER.info(e.getMessage());
+                        }
+                    }
+                }));
             }
 
+            LOGGER.info("End of application");
         }
     }
 
@@ -71,7 +87,6 @@ public class TwitterProducer {
         StatusesFilterEndpoint hosebirdEndpoint = new StatusesFilterEndpoint();
         // Optional: set up some followings and track terms
         List<Long> followings = Lists.newArrayList(1234L, 566788L);
-        List<String> terms = Lists.newArrayList("twitter", "api");
         hosebirdEndpoint.followings(followings);
         hosebirdEndpoint.trackTerms(terms);
 
